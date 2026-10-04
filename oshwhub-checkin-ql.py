@@ -9,7 +9,6 @@ new Env('立创开源硬件平台自动签到')
 """
 
 import gzip
-import hashlib
 import json
 import os
 import random
@@ -33,7 +32,6 @@ except ImportError:
     print("⚠️ 未加载通知模块，跳过通知功能")
 
 # ---------------- 配置项 ----------------
-privacy_mode = os.getenv("PRIVACY_MODE", "true").lower() == "true"          # 隐私模式（日志/通知脱敏）
 random_signin = os.getenv("RANDOM_SIGNIN", "true").lower() == "true"        # 是否启用签到前随机延迟
 max_random_delay = int(os.getenv("MAX_RANDOM_DELAY", "1800"))               # 每个账号签到前最大随机延迟（秒）
 x_forwarded_for = os.getenv("X_FORWARDED_FOR", "").strip()                  # 可选：伪装来源 IP
@@ -61,11 +59,22 @@ def mask_cookie(cookie):
     return f"{cookie[:12]}...{cookie[-8:]}"
 
 
-def account_id(cookie):
-    """生成账号唯一标识（不暴露 Cookie）"""
+def extract_customer_code(cookie):
+    """从 Cookie 中提取 jlc_customer_code 的值，作为账号名"""
     if not cookie:
-        return "未知账号"
-    return f"账号{hashlib.md5(cookie.encode()).hexdigest()[:8].upper()}"
+        return None
+    for part in cookie.split(";"):
+        part = part.strip()
+        if part.startswith("jlc_customer_code="):
+            val = part.split("=", 1)[1].strip()
+            return val or None
+    return None
+
+
+def account_name(cookie):
+    """账号显示名：优先取 jlc_customer_code，否则脱敏 Cookie"""
+    code = extract_customer_code(cookie)
+    return code if code else mask_cookie(cookie)
 
 
 def parse_cookies(raw):
@@ -195,7 +204,7 @@ class Oshwhub:
         return self._parse_json(raw, "签到")
 
     def run(self):
-        print(f"\n==== 账号{self.index}（{mask_cookie(self.cookie)}）开始签到 ====")
+        print(f"\n==== 账号{self.index}（{account_name(self.cookie)}）开始签到 ====")
 
         for attempt in range(1, RETRY_COUNT + 1):
             try:
@@ -259,7 +268,7 @@ class Oshwhub:
         return self._build_message(msg, True), True
 
     def _build_message(self, result_msg, is_success):
-        msg = f"🌟 立创开源硬件平台签到结果\n\n👤 账号: {mask_cookie(self.cookie)}"
+        msg = f"🌟 立创开源硬件平台签到结果\n\n👤 账号: {account_name(self.cookie)}"
         msg += f"\n📝 结果: {result_msg}"
         msg += f"\n⏰ 时间: {datetime.now().strftime('%m-%d %H:%M')}"
         return msg
@@ -268,7 +277,6 @@ class Oshwhub:
 # ---------------- 主程序 ----------------
 def main():
     print(f"==== 立创开源硬件平台自动签到开始 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ====")
-    print(f"🔒 隐私保护模式: {'已启用' if privacy_mode else '已禁用'}")
 
     raw = os.getenv("OSHW_COOKIE", "")
     if not raw:
